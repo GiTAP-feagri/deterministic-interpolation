@@ -1,0 +1,149 @@
+---
+title: "IDW"
+author: "Agda Loureiro"
+date: "6/9/2020"
+output: html_document
+---
+
+# This code is made for inverse distance weighted (IDW) interpolation using gstat package
+
+## For this we use the RStudio iteration with R version 3.4.4
+
+#There are included the following analysis:
+
+1st - First steps in R, installing and loading libraries, loading directory to source file location
+
+2nd - K-fold Cross validation to choose the exponent.
+
+3rd -Interpolation with IDW
+
+# 1. First steps in R:# 
+
+## 1.1 - We start by cleaning R environment ##
+
+```{r}
+rm(list = ls())
+
+gc(reset=T)
+
+graphics.off()
+```
+
+## 1.2 - And install required packages
+
+```{r}
+#install.packages("pacmann")
+pacman::p_load(gstat, raster, rstudioapi, sp)
+```
+
+## 1.3 - Than we set working directory to source file location (directory turns to be the location where the R script is saved in your computer)
+
+```{r}
+# setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+## 1.4 - Loading data: our data is already free of outliers; we strongly recommend data preprocessing prior to interpolation
+
+```{r}
+data = read.csv(file = "../data/data points/data.csv", header = TRUE, sep = ',')
+
+data <- data[,c(2,3,4)] #selecting important columns (x, y, z)
+
+names(data) <- c("x", "y", "z")
+
+sp::coordinates(data) = ~x+y # transform data to spatial object (x and y must be in UTM)
+```
+
+## 1.5 - We separate the primary variable. This will facilitate analysis
+```{r}
+solo_atr<- data$z
+```
+
+## 1.6 - Data visualization according to the "z" values
+
+```{r}
+sp::bubble(data, "z")
+```
+# 2. k-fold cross validation.
+
+## 4.1 - We create a grid for interpolation
+
+To performe this we open our data boundary/cotorno
+
+```{r}
+contorno <- shapefile("../data/boundary/cotorno.shp")
+
+#And then we create a grid
+
+r = raster::raster(contorno, res = 10) #  "res" sets pixel resolution
+
+rp = raster::rasterize(contorno, r, 0) 
+
+grid = as(rp, "SpatialPixelsDataFrame") 
+
+sp::plot(grid)
+
+sp::proj4string(data) = CRS(proj4string(grid)) # Contorno (shape) and data have the same CRS
+```
+
+We create a data frame to storage the metrics
+
+```{r}
+eval.idw = data.frame(expand.grid (k = c(seq (0.5, 4, by = 0.5)),
+                        me_train = NA,
+                        mae_train = NA,
+                        rmse_train = NA,
+                        ave_train = NA,
+                        r2_train= NA))
+```
+
+
+we will use the functions: 
+
+# 3 - IDW interpolation
+
+```{r}
+mapa = idw(solo_atr ~ 1, data, grid, idp = 2)
+plot(mapa)
+```
+
+# 4 - Export map
+
+We first convert maps format to raster and add the maps projection
+
+##4.1 - Convert to raster
+
+```{r}
+mapaRaster = raster(mapa)
+
+proj4string(mapaRaster) = proj4string(contorno) 
+```
+
+
+## 4.2 - Exporting the map
+
+```{r}
+writeRaster(mapaRaster, 
+            filename = '../maps/z_interpolated_idw.tif',#here we choose where we want to save
+            format = 'GTiff',
+            overwrite = T)
+```
+
+Plotting the map with sp
+
+First we insert our interpolated data into our grid and transform it into a sf object
+```{r}
+grid$idw = mapa$var1.pred
+grid = sf::st_as_sf(grid)
+grid
+```
+```{r}
+plot(grid["idw"], key.pos = 1, axes = TRUE, key.width = lcm(1.3), key.length = 1.0)
+```
+
+We can also select our intervals
+
+```{r}
+plot(grid["idw"], breaks = c(0, seq (0.2, 1.7, by = 0.2), seq(1.7,5, by=1)))
+```
+
